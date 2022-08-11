@@ -8,6 +8,7 @@ from os import listdir
 CHUNK_DIR = "chunks"
 TARGET_TRAIN_FILE = "nwbib_subjects_train.tsv"
 TARGET_TEST_FILE = "nwbib_subjects_test.tsv" 
+TARGET_NO_SUBJECTS_FILE = "nwbib_unindexed_titles.txt"
 
 ARGS_HELP_STRINGS = {
     "stats": "Prints statistical information on all processed NWBib data"
@@ -42,6 +43,7 @@ def main():
     subjects_distribution = {}
     
     records = []
+    records_without_subjects = []
 
     for filename in listdir(CHUNK_DIR):
         path = join(CHUNK_DIR, filename)
@@ -59,7 +61,10 @@ def main():
                     else:
                         record_keys_distribution[key] += 1
                 data = extract_data(record)
-                records.append(data)
+                if data["subjects"]:
+                    records.append(data)
+                else:
+                    records_without_subjects.append(data)
                 total_records += 1
                 num_subjects = len(data["subjects"])
                 if num_subjects not in subjects_per_record_distribution:
@@ -91,6 +96,10 @@ def main():
             subjects = ["<" + subject_tup[0] + ">" for subject_tup in record["subjects"]]
             line = [combined_title] + subjects
             writer.writerow(line)
+    with open(TARGET_NO_SUBJECTS_FILE, "w") as tnsf:
+        for record in records_without_subjects:
+            combined_title = record["title"] if not record["otherTitleInformation"] else record["title"] + " - " + record["otherTitleInformation"]
+            tnsf.write(combined_title + "\n")
 
 if __name__ == '__main__':
     main()
