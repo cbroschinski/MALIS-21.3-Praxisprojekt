@@ -1,0 +1,3 @@
+# Praxisprojekt: Erstellung eines Systems zur automatischen Inhaltserschließung in der NWBib
+
+Das HBZ betreibt mit der [NWBib](https://nwbib.de/) seit 1983 die Landesbibliographie für das Bundesland Nordrhein-Westfalen. Diese Sammlung enthält zur Zeit mehr als 450.000 Nachweise zu Titeln mit entsprechendem Regionalbezug, die jeweils intellektuell erschlossen und verschlagwortet wurden. In diesem Praxisprojekt soll der Versuch unternommen werden, mithilfe von Methoden des maschinellen Lernens ein System zur (halb-)automatischen Indexierung zu schaffen, das für neue Titel automatisch geeignete Indexterme vorschlagen kann. Hierzu soll das an der finnischen Nationalbibliothek entwickelte System [Annif](NWBib) zum Einsatz kommen.
