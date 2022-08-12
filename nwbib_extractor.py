@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+import re
 from os.path import join, splitext
 from os import listdir
 
@@ -10,8 +11,14 @@ TARGET_TRAIN_FILE = "nwbib_subjects_train.tsv"
 TARGET_TEST_FILE = "nwbib_subjects_test.tsv" 
 TARGET_NO_SUBJECTS_FILE = "nwbib_unindexed_titles.txt"
 
+SKOS_VOCAB_TERMS = None
+
 ARGS_HELP_STRINGS = {
-    "stats": "Prints statistical information on all processed NWBib data"
+    "stats": "Prints statistical information on all processed NWBib data",
+    "vocabulary": ("Add a path to the NWBib SKOS vocabulary file "
+                   "(https://github.com/hbz/lobid-vocabs/blob/master/nwbib/nwbib.ttl). "
+                   "All NWBib subjects will be tested against the vocabulary "
+                   "and excluded if not found.")
 }
 
 def extract_data(record):
@@ -28,15 +35,39 @@ def extract_data(record):
         source_id = subject_dict.get("id", '')
         if source_id.startswith("https://nwbib.de/subjects"):
             label = subject_dict.get("label", '')
-            ret["subjects"].append((source_id, label))
+            if SKOS_VOCAB_TERMS is None:
+                ret["subjects"].append((source_id, label))
+            else:
+                if source_id in SKOS_VOCAB_TERMS:
+                    ret["subjects"].append((source_id, label))
+                else:
+                    msg = 'Warning: Subject {} ({}) not found in provided SKOS vocabulary - skipping'
+                    print(msg.format(source_id, label))
     return ret
+
+def _extract_voc_terms(voc_file_path):
+    global SKOS_VOCAB_TERMS
+    term_id_pattern = re.compile("^:(?P<term_id>N[0-9]+)$")
+    SKOS_VOCAB_TERMS = []
+    with open(voc_file_path) as voc:
+        for line in voc:
+            match = term_id_pattern.match(line)
+            if match:
+                term = "https://nwbib.de/subjects#" + match.group("term_id")
+                SKOS_VOCAB_TERMS.append(term)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--stats", action="store_true",
                         help=ARGS_HELP_STRINGS["stats"])
+    parser.add_argument("-v", "--vocabulary",
+                        help=ARGS_HELP_STRINGS["vocabulary"])
     args = parser.parse_args()
-
+    
+    if args.vocabulary:
+        _extract_voc_terms(args.vocabulary)
+    
+    print(SKOS_VOCAB_TERMS)
     total_records = 0
     record_keys_distribution = {}
     subjects_per_record_distribution = {}
@@ -66,6 +97,8 @@ def main():
                 else:
                     records_without_subjects.append(data)
                 total_records += 1
+                if len(records) % 100000 == 0:
+                    print(str(len(records)) + " records processed")
                 num_subjects = len(data["subjects"])
                 if num_subjects not in subjects_per_record_distribution:
                     subjects_per_record_distribution[num_subjects] = 1
@@ -77,10 +110,9 @@ def main():
                         subjects_distribution[stats_key] = 1
                     else:
                         subjects_distribution[stats_key] += 1
+                
         #print(json.dumps(json_dicts[100], indent = 2))
         #print(json_dicts[100].keys())
-        if len(records) % 100000 == 0:
-            print(str(len(records)) + " records processed")
     print("Total NWBIB records: " + str(total_records))
     print("Subject count distribution: ")
     print(json.dumps(subjects_per_record_distribution, indent = 2, sort_keys = True))
