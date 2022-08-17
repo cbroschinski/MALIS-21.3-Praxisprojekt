@@ -4,6 +4,7 @@ import json
 import re
 from os.path import join, splitext
 from os import listdir
+import sys
 
 
 CHUNK_DIR = "chunks"
@@ -18,7 +19,15 @@ ARGS_HELP_STRINGS = {
     "vocabulary": ("Add a path to the NWBib SKOS vocabulary file "
                    "(https://github.com/hbz/lobid-vocabs/blob/master/nwbib/nwbib.ttl). "
                    "All NWBib subjects will be tested against the vocabulary "
-                   "and excluded if not found.")
+                   "and excluded if not found."),
+    "percentage_test_data": ("A float between 0.0 and 1.0 which determines the percentage "
+                             "of extracted data to be redirected to the test file. Defaults "
+                             "to 0.1"),
+    "test_data_starting_index": ("An int value which correlates to a record index in the NWBib "
+                                 "data. If set, the test data will be extract continuously "
+                                 "from this record on until the desired percentage of test "
+                                 "data is reached. If not set, test data will be sampled "
+                                 "at random.")
 }
 
 def extract_data(record):
@@ -56,24 +65,38 @@ def _extract_voc_terms(voc_file_path):
                 term = "https://nwbib.de/subjects#" + match.group("term_id")
                 SKOS_VOCAB_TERMS.append(term)
 
+def _prepare_tsv_data(record):
+    combined_title = record["title"] if not record["otherTitleInformation"] else record["title"] + " - " + record["otherTitleInformation"]
+    subjects = ["<" + subject_tup[0] + ">" for subject_tup in record["subjects"]]
+    line = [combined_title] + subjects
+    return line
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--stats", action="store_true",
                         help=ARGS_HELP_STRINGS["stats"])
     parser.add_argument("-v", "--vocabulary",
                         help=ARGS_HELP_STRINGS["vocabulary"])
+    parser.add_argument("-p", "--percentage_test_data", type=float, default=0.1,
+                        help=ARGS_HELP_STRINGS["percentage_test_data"])
+    parser.add_argument("-t", "--test_data_starting_index", type=int,
+                        help=ARGS_HELP_STRINGS["test_data_starting_index"])
     args = parser.parse_args()
+    
+    if args.percentage_test_data > 1.0 or args.percentage_test_data < 0.0:
+        print("ERROR: Test data percentage must be a value between 0.0 and 1.0!")
+        sys.exit()
     
     if args.vocabulary:
         _extract_voc_terms(args.vocabulary)
-    
+        
     print(SKOS_VOCAB_TERMS)
     total_records = 0
     record_keys_distribution = {}
     subjects_per_record_distribution = {}
     subjects_distribution = {}
     
-    records = []
+    valid_records = []
     records_without_subjects = []
 
     for filename in listdir(CHUNK_DIR):
@@ -93,12 +116,12 @@ def main():
                         record_keys_distribution[key] += 1
                 data = extract_data(record)
                 if data["subjects"]:
-                    records.append(data)
+                    valid_records.append(data)
                 else:
                     records_without_subjects.append(data)
                 total_records += 1
-                if len(records) % 100000 == 0:
-                    print(str(len(records)) + " records processed")
+                if len(valid_records) % 100000 == 0:
+                    print(str(len(valid_records)) + " valid records extracted")
                 num_subjects = len(data["subjects"])
                 if num_subjects not in subjects_per_record_distribution:
                     subjects_per_record_distribution[num_subjects] = 1
@@ -119,15 +142,38 @@ def main():
     print(json.dumps(record_keys_distribution, indent = 2, sort_keys = True))
     print(json.dumps(subjects_distribution, indent = 2, sort_keys = True))
     
+    num_test_records = round(len(valid_records) * args.percentage_test_data)
+    msg = "{} valid records extracted from NWBib file, {} ({}%) will be reserved for the test file." 
+    print(msg.format(len(valid_records), num_test_records, args.percentage_test_data * 100))
+
+    if args.test_data_starting_index:
+        if args.test_data_starting_index > (len(valid_records) - 1):
+            msg = "ERROR: Starting index is out of bounds ({}, but only {} valid records could be extracted)."
+            print(msg.format(args.test_data_starting_index, len(valid_records)))
+            sys.exit()
+        ending_index = args.test_data_starting_index + num_test_records
+        if ending_index > (len(valid_records) - 1):
+            ending_index = len(valid_records) - 1
+            msg = "WARNING: Starting index is too high, can only extract {} valid records before end of file is reached."
+            print(msg.format(ending_index - args.test_data_starting_index))
+        test_indexes = range(args.test_data_starting_index, ending_index) 
+
+    training_records = []
+    test_records = []
+    for i in range(len(valid_records)):
+        if i in test_indexes:
+            test_records.append(valid_records[i])
+        else:
+            training_records.append(valid_records[i])
+    
     with open(TARGET_TRAIN_FILE, "w") as ttf:
         writer = csv.writer(ttf, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        for record in records:
-            if not record["subjects"]:
-                continue
-            combined_title = record["title"] if not record["otherTitleInformation"] else record["title"] + " - " + record["otherTitleInformation"]
-            subjects = ["<" + subject_tup[0] + ">" for subject_tup in record["subjects"]]
-            line = [combined_title] + subjects
-            writer.writerow(line)
+        for record in training_records:
+            writer.writerow(_prepare_tsv_data(record))
+    with open(TARGET_TEST_FILE, "w") as ttf:
+        writer = csv.writer(ttf, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        for record in test_records:
+            writer.writerow(_prepare_tsv_data(record))
     with open(TARGET_NO_SUBJECTS_FILE, "w") as tnsf:
         for record in records_without_subjects:
             combined_title = record["title"] if not record["otherTitleInformation"] else record["title"] + " - " + record["otherTitleInformation"]
