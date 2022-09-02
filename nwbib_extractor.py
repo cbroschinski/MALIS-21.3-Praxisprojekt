@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+from random import shuffle
 import re
 from os.path import join, splitext
 from os import listdir
@@ -9,7 +10,7 @@ import sys
 
 CHUNK_DIR = "chunks"
 TARGET_TRAIN_FILE = "nwbib_subjects_train.tsv"
-TARGET_TEST_FILE = "nwbib_subjects_test.tsv" 
+TARGET_EVAL_FILE = "nwbib_subjects_eval.tsv" 
 TARGET_NO_SUBJECTS_FILE = "nwbib_unindexed_titles.txt"
 
 SKOS_VOCAB_TERMS = None
@@ -20,13 +21,13 @@ ARGS_HELP_STRINGS = {
                    "(https://github.com/hbz/lobid-vocabs/blob/master/nwbib/nwbib.ttl). "
                    "All NWBib subjects will be tested against the vocabulary "
                    "and excluded if not found."),
-    "percentage_test_data": ("A float between 0.0 and 1.0 which determines the percentage "
-                             "of extracted data to be redirected to the test file. Defaults "
+    "percentage_eval_data": ("A float between 0.0 and 1.0 which determines the percentage "
+                             "of extracted data to be redirected to the eval file. Defaults "
                              "to 0.1"),
-    "test_data_starting_index": ("An int value which correlates to a record index in the NWBib "
-                                 "data. If set, the test data will be extract continuously "
-                                 "from this record on until the desired percentage of test "
-                                 "data is reached. If not set, test data will be sampled "
+    "eval_data_starting_index": ("An int value which correlates to a record index in the NWBib "
+                                 "data. If set, the eval data will be extract continuously "
+                                 "from this record on until the desired percentage of eval "
+                                 "data is reached. If not set, eval data will be sampled "
                                  "at random.")
 }
 
@@ -77,20 +78,19 @@ def main():
                         help=ARGS_HELP_STRINGS["stats"])
     parser.add_argument("-v", "--vocabulary",
                         help=ARGS_HELP_STRINGS["vocabulary"])
-    parser.add_argument("-p", "--percentage_test_data", type=float, default=0.1,
-                        help=ARGS_HELP_STRINGS["percentage_test_data"])
-    parser.add_argument("-t", "--test_data_starting_index", type=int,
-                        help=ARGS_HELP_STRINGS["test_data_starting_index"])
+    parser.add_argument("-p", "--percentage_eval_data", type=float, default=0.1,
+                        help=ARGS_HELP_STRINGS["percentage_eval_data"])
+    parser.add_argument("-t", "--eval_data_starting_index", type=int,
+                        help=ARGS_HELP_STRINGS["eval_data_starting_index"])
     args = parser.parse_args()
     
-    if args.percentage_test_data > 1.0 or args.percentage_test_data < 0.0:
-        print("ERROR: Test data percentage must be a value between 0.0 and 1.0!")
+    if args.percentage_eval_data > 1.0 or args.percentage_eval_data < 0.0:
+        print("ERROR: Eval data percentage must be a value between 0.0 and 1.0!")
         sys.exit()
     
     if args.vocabulary:
         _extract_voc_terms(args.vocabulary)
-        
-    print(SKOS_VOCAB_TERMS)
+
     total_records = 0
     record_keys_distribution = {}
     subjects_per_record_distribution = {}
@@ -142,27 +142,38 @@ def main():
     print(json.dumps(record_keys_distribution, indent = 2, sort_keys = True))
     print(json.dumps(subjects_distribution, indent = 2, sort_keys = True))
     
-    num_test_records = round(len(valid_records) * args.percentage_test_data)
-    msg = "{} valid records extracted from NWBib file, {} ({}%) will be reserved for the test file." 
-    print(msg.format(len(valid_records), num_test_records, args.percentage_test_data * 100))
+    num_eval_records = round(len(valid_records) * args.percentage_eval_data)
+    msg = "{} valid records extracted from NWBib file, {} ({}%) will be reserved for the eval file." 
+    print(msg.format(len(valid_records), num_eval_records, args.percentage_eval_data * 100))
 
-    if args.test_data_starting_index:
-        if args.test_data_starting_index > (len(valid_records) - 1):
+    if args.eval_data_starting_index:
+        if args.eval_data_starting_index > (len(valid_records) - 1):
             msg = "ERROR: Starting index is out of bounds ({}, but only {} valid records could be extracted)."
-            print(msg.format(args.test_data_starting_index, len(valid_records)))
+            print(msg.format(args.eval_data_starting_index, len(valid_records)))
             sys.exit()
-        ending_index = args.test_data_starting_index + num_test_records
+        ending_index = args.eval_data_starting_index + num_eval_records
         if ending_index > (len(valid_records) - 1):
             ending_index = len(valid_records) - 1
             msg = "WARNING: Starting index is too high, can only extract {} valid records before end of file is reached."
-            print(msg.format(ending_index - args.test_data_starting_index))
-        test_indexes = range(args.test_data_starting_index, ending_index) 
+            print(msg.format(ending_index - args.eval_data_starting_index))
+        msg = "Records from index {} to {} will be reserved as eval data."
+        print(msg.format(args.eval_data_starting_index, ending_index))
+        eval_indexes = range(args.eval_data_starting_index, ending_index) 
+    else:
+        msg = "No starting index given, {} eval records will be select at random"
+        print(msg.format(num_eval_records))
+        all_indexes = list(range(len(valid_records)))
+        shuffle(all_indexes)
+        eval_indexes = all_indexes[:num_eval_records]
+        eval_indexes.sort()
 
     training_records = []
-    test_records = []
+    eval_records = []
     for i in range(len(valid_records)):
-        if i in test_indexes:
-            test_records.append(valid_records[i])
+        if  eval_indexes and eval_indexes[0] == i:
+            eval_records.append(valid_records[i])
+            eval_indexes.pop(0)
+            print(eval_indexes[:10])
         else:
             training_records.append(valid_records[i])
     
@@ -170,9 +181,9 @@ def main():
         writer = csv.writer(ttf, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         for record in training_records:
             writer.writerow(_prepare_tsv_data(record))
-    with open(TARGET_TEST_FILE, "w") as ttf:
+    with open(TARGET_EVAL_FILE, "w") as ttf:
         writer = csv.writer(ttf, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        for record in test_records:
+        for record in eval_records:
             writer.writerow(_prepare_tsv_data(record))
     with open(TARGET_NO_SUBJECTS_FILE, "w") as tnsf:
         for record in records_without_subjects:
