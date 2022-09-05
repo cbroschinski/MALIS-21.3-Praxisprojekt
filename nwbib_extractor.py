@@ -72,6 +72,21 @@ def _prepare_tsv_data(record):
     line = [combined_title] + subjects
     return line
 
+def _print_stats(stats):
+    print ("\n---Statistics---\n")
+    print("1) Total NWBIB records: " + str(stats["total_records"]) + "\n")
+    print("2) Subject count distribution (number of records with exactly n subjects): \n")
+    for k, v in sorted(stats["subjects_per_record_distribution"].items(), key=lambda x: x[1], reverse=True):
+        print("{} subject(s): {}".format(k, v))
+    print("\n3) Record keys distribution (how often does a certain first-level key occur in all records?): \n")
+    for k, v in sorted(stats["record_keys_distribution"].items(), key=lambda x: x[1], reverse=True):
+        print("{}: {}".format(k, v))
+    print("\n4) Subject distribution (which subjects occur most often in all records? List is limited to the 100 most frequent subjects): \n")
+    subjects_dist = list(stats["subjects_distribution"].items())
+    for k, v in sorted(subjects_dist[:100], key=lambda x: x[1], reverse=True):
+        print("{}: {}".format(k, v))
+    print("\n\n")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--stats", action="store_true",
@@ -91,10 +106,12 @@ def main():
     if args.vocabulary:
         _extract_voc_terms(args.vocabulary)
 
-    total_records = 0
-    record_keys_distribution = {}
-    subjects_per_record_distribution = {}
-    subjects_distribution = {}
+    stats = {
+        "total_records": 0,
+        "record_keys_distribution": {},
+        "subjects_per_record_distribution": {},
+        "subjects_distribution": {}
+    }
     
     valid_records = []
     records_without_subjects = []
@@ -109,39 +126,36 @@ def main():
                 print("Could not read from file {}: {}".format(path, jsond))
                 continue
             for record in json_dicts:
-                for key in record.keys():
-                    if key not in record_keys_distribution:
-                        record_keys_distribution[key] = 1
-                    else:
-                        record_keys_distribution[key] += 1
                 data = extract_data(record)
                 if data["subjects"]:
                     valid_records.append(data)
                 else:
                     records_without_subjects.append(data)
-                total_records += 1
-                if len(valid_records) % 100000 == 0:
-                    print(str(len(valid_records)) + " valid records extracted")
-                num_subjects = len(data["subjects"])
-                if num_subjects not in subjects_per_record_distribution:
-                    subjects_per_record_distribution[num_subjects] = 1
-                else:
-                    subjects_per_record_distribution[num_subjects] += 1
-                for subject_tup in data["subjects"]:
-                    stats_key = subject_tup[0] + " (" + subject_tup[1] + ")"
-                    if stats_key not in subjects_distribution:
-                        subjects_distribution[stats_key] = 1
+                stats["total_records"] += 1
+                if stats["total_records"] % 50000 == 0:
+                    print(str(stats["total_records"]) + " records processed")
+                if args.stats:
+                    # collect statistical data
+                    for key in record.keys():
+                        if key not in stats["record_keys_distribution"]:
+                            stats["record_keys_distribution"][key] = 1
+                        else:
+                            stats["record_keys_distribution"][key] += 1
+                    num_subjects = len(data["subjects"])
+                    if num_subjects not in stats["subjects_per_record_distribution"]:
+                        stats["subjects_per_record_distribution"][num_subjects] = 1
                     else:
-                        subjects_distribution[stats_key] += 1
-                
-        #print(json.dumps(json_dicts[100], indent = 2))
-        #print(json_dicts[100].keys())
-    print("Total NWBIB records: " + str(total_records))
-    print("Subject count distribution: ")
-    print(json.dumps(subjects_per_record_distribution, indent = 2, sort_keys = True))
-    print(json.dumps(record_keys_distribution, indent = 2, sort_keys = True))
-    print(json.dumps(subjects_distribution, indent = 2, sort_keys = True))
-    
+                        stats["subjects_per_record_distribution"][num_subjects] += 1
+                    for subject_tup in data["subjects"]:
+                        stats_key = subject_tup[0] + " (" + subject_tup[1] + ")"
+                        if stats_key not in stats["subjects_distribution"]:
+                            stats["subjects_distribution"][stats_key] = 1
+                        else:
+                            stats["subjects_distribution"][stats_key] += 1
+
+    if args.stats:
+        _print_stats(stats)
+
     num_test_records = round(len(valid_records) * args.percentage_test_data)
     msg = "{} valid records extracted from NWBib file, {} ({}%) will be reserved for the test file." 
     print(msg.format(len(valid_records), num_test_records, args.percentage_test_data * 100))
@@ -173,10 +187,9 @@ def main():
         if  test_indexes and test_indexes[0] == i:
             test_records.append(valid_records[i])
             test_indexes.pop(0)
-            print(test_indexes[:10])
         else:
             training_records.append(valid_records[i])
-    
+
     with open(TARGET_TRAIN_FILE, "w") as ttf:
         writer = csv.writer(ttf, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         for record in training_records:
