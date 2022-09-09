@@ -1,4 +1,4 @@
-# Praxisprojekt: Erstellung eines Systems zur automatischen Inhaltserschließung in der NWBib
+# Praxisprojekt: Erstellung eines Systems zur automatischen Klassifikation in der NWBib
 
 Das HBZ betreibt mit der [NWBib](https://nwbib.de/) seit 1983 die Landesbibliographie für das Bundesland Nordrhein-Westfalen. Diese Sammlung enthält zur Zeit mehr als 450.000 Nachweise zu Titeln mit entsprechendem Regionalbezug, die jeweils intellektuell erschlossen und klassifiziert wurden. In diesem Praxisprojekt wurde mithilfe von Methoden des maschinellen Lernens ein System zur (halb-)automatischen Klassifikation geschaffen, das für neue Titel automatisch geeignete Klassen innerhalb der [NWBib-Sachsystematik](https://nwbib.de/subjects) vorschlagen kann. Hierzu kommt das an der finnischen Nationalbibliothek entwickelte System [Annif](NWBib) zum Einsatz.
 
@@ -10,7 +10,7 @@ Die folgende Anleitung besteht aus zwei Teilen: Im ersten Teil wird ein vollstä
 
 1. Im Folgenden wird als Grundlage das Aufsetzten einer lokalen Annif-Installation beschrieben. Falls eine dauerhafte Server-Lösung gewünscht ist, sollte Annif als WSGI-Service installiert werden, was zusätzliche Schritte erfordert. Eine Anleitung dazu findet sich [hier](https://github.com/NatLibFi/Annif/wiki/Running-as-a-WSGI-service), die folgende grundlegende Vorgehensweise sind aber bei beiden Wegen identisch.
 
-Verwendet werden im Folgenden Annif v0.58 und Python 3.8 (ein Versuch mit Python 3.10 war nicht erfolgreich, da hier einige als "deprecated" gekennzeichnete Module nicht mehr existieren)
+Verwendet werden im Folgenden Annif v0.58 und Python 3.8.
 
 ```
 git clone --branch v0.58.0 https://github.com/NatLibFi/Annif.git
@@ -69,11 +69,19 @@ annif train nwbib-omikuji nwbib-data/nwbib_subjects_train.tsv
 annif train nwbib-fasttext nwbib-data/nwbib_subjects_train.tsv
 ```
 
+6. Sobald die einzelnen Backends einsatzbereit sind, müssen im letzten Schritt noch die Ensemble-Backends trainiert werden. Die einfachen Ensembles benötigen kein Training, sondern lediglich die NN-basierten:
+
+```
+annif train nwbib-ensemble-nn nwbib-data/nwbib_subjects_train.tsv -j 8
+annif train nwbib-triple-ensemble-nn nwbib-data/nwbib_subjects_train.tsv -j 8
+```
+
+Der Parameter `-j` gibt die Anzahl der maximalen Threads an, hier empfiehlt es sich, das Maximum nicht auszuschöpfen, da es sonst zu Speicher- und Performanceproblemen kommen kann. Auf der zum Training verwendeten Maschine standen 16 logische CPU-Kerne zur Verfügung, die Anzahl der Threads wurde auf die Hälfte beschränkt.
 
 
+### Generierung neuer Korpora
 
-
-
+Falls Annif mit einem aktuellen Snapshot der NWBib neu trainiert werden soll, können auf folgende Weise der entsprechende Trainings- und Testkorpus erstellt werden: 
 
 1. Gesamtabzug der NWBib über die [lobid-API](https://blog.lobid.org/2019/10/08/nwbib-at-cdv.html) extrahieren und entpacken :
 
@@ -82,10 +90,16 @@ curl --header "Accept-Encoding: gzip" "http://lobid.org/resources/search?q=inCol
 gunzip nwbib.gz
 ```
 
-2. Chunk-Skript verwenden, um die Datei in kleinere Bestandteile aufzuspalten (vermeidet Speicherprobleme bei der späteren Verarbeitung mit Python):
+2. Chunk-Skript ausführen, um die Datei in kleinere Bestandteile aufzuspalten (vermeidet Speicherprobleme bei der späteren Verarbeitung mit Python):
 
 ```
 python nwbib_chunker.py
+```
+
+3. Extraktor-Skript ausführen, um die Korpora zu erzeugen. Das Skript kann mit zusätzlichen Argumenten aufgerufen werden, `-h` zeigt eine Übersicht. Falls keine weiteren Einstellungen zur Korpusgröße angegeben werden, werden Trainings- und Testkorpus mit einer randomisierten 90:10-Partitionierung erstellt, dies ist die Datengrundlage, die auch im Fachaufsatz beschrieben wird. Zusätzlich sollte allerdings das SKOS-Vokabular der NWBib über den Parameter `-v` angeben werden, damit fehlerhafte Terme ausgefiltert werden können.
+
+```
+python nwbib_extractor.py -v nwbib.ttl
 ```
 
 
