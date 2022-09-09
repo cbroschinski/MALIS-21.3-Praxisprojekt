@@ -172,7 +172,7 @@ def main():
             print(msg.format(ending_index - args.test_data_starting_index))
         msg = "Records from index {} to {} will be reserved as test data."
         print(msg.format(args.test_data_starting_index, ending_index))
-        test_indexes = range(args.test_data_starting_index, ending_index) 
+        test_indexes = list(range(args.test_data_starting_index, ending_index))
     else:
         msg = "No starting index given, {} test records will be select at random"
         print(msg.format(num_test_records))
